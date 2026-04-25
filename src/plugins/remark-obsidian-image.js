@@ -1,6 +1,6 @@
 import { visit } from 'unist-util-visit';
 
-export default function remarkObsidianImage() {
+export default function remarkObsidianImage({ base = '' } = {}) {
   return (tree) => {
     visit(tree, 'text', (node, index, parent) => {
       const regex = /!\[\[([^\]]+)\]\]/g;
@@ -15,7 +15,7 @@ export default function remarkObsidianImage() {
         const filename = match[1];
         newNodes.push({
           type: 'image',
-          url: `/images/${filename}`,
+          url: `${base}/images/${filename}`,
           alt: filename,
           title: null,
         });

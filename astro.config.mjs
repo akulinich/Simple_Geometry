@@ -15,7 +15,7 @@ export default defineConfig({
         // hardcoded base — if repo is renamed, update here too
         hrefTemplate: (permalink) => `/Simple_Geometry/articles/${permalink}`,
       }],
-      remarkObsidianImage,
+      [remarkObsidianImage, { base: '/Simple_Geometry' }],
     ],
     rehypePlugins: [
       rehypeKatex,
