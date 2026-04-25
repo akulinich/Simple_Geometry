@@ -40,12 +40,23 @@ def find_images_in_md(content):
 
 
 def get_all_articles(notes_folder):
-    """Returns list of (rel_path, is_imported) sorted by name."""
-    if not notes_folder or not Path(notes_folder).exists():
-        return []
-    root = Path(notes_folder)
-    imported = set(os.listdir(ARTICLES_DIR)) if ARTICLES_DIR.exists() else set()
-    result = [(str(f.relative_to(root)), f.name in imported) for f in root.rglob('*.md')]
+    """Returns list of (display_path, status) where status is 'new'|'imported'|'site_only'."""
+    site_names = set(os.listdir(ARTICLES_DIR)) if ARTICLES_DIR.exists() else set()
+    result = []
+    obsidian_names = set()
+
+    if notes_folder and Path(notes_folder).exists():
+        root = Path(notes_folder)
+        for f in root.rglob('*.md'):
+            status = 'imported' if f.name in site_names else 'new'
+            result.append((str(f.relative_to(root)), status))
+            obsidian_names.add(f.name)
+
+    if ARTICLES_DIR.exists():
+        for f in ARTICLES_DIR.glob('*.md'):
+            if f.name not in obsidian_names:
+                result.append((f.name, 'site_only'))
+
     return sorted(result, key=lambda x: x[0])
 
 
@@ -417,6 +428,7 @@ class ImportTool(tk.Tk):
         self.resizable(True, True)
         self.settings = load_settings()
         self._all_articles = []
+        self._filtered = []
         self._queue = []
         self._build_ui()
         self._refresh_list()
@@ -449,10 +461,18 @@ class ImportTool(tk.Tk):
         ttk.Button(btn_row, text='Обновить', command=self._refresh_list).pack(side='left')
         ttk.Button(btn_row, text='Выбрать все', command=self._select_all).pack(side='left', padx=6)
         ttk.Button(btn_row, text='Снять все', command=self._deselect_all).pack(side='left')
+        self.show_not_imported_var = tk.BooleanVar(value=self.settings.get('show_not_imported', True))
+        ttk.Checkbutton(btn_row, text='Не импортированные',
+                        variable=self.show_not_imported_var,
+                        command=self._on_filter_toggle).pack(side='left', padx=(12, 4))
         self.show_imported_var = tk.BooleanVar(value=self.settings.get('show_imported', False))
-        ttk.Checkbutton(btn_row, text='Показать импортированные',
+        ttk.Checkbutton(btn_row, text='Импортированные',
                         variable=self.show_imported_var,
-                        command=self._on_show_imported_toggle).pack(side='left', padx=12)
+                        command=self._on_filter_toggle).pack(side='left', padx=4)
+        self.show_site_only_var = tk.BooleanVar(value=self.settings.get('show_site_only', False))
+        ttk.Checkbutton(btn_row, text='Только на сайте',
+                        variable=self.show_site_only_var,
+                        command=self._on_filter_toggle).pack(side='left', padx=4)
         self.count_label = ttk.Label(btn_row, text='', foreground='gray')
         self.count_label.pack(side='right')
 
@@ -486,16 +506,20 @@ class ImportTool(tk.Tk):
         if folder:
             self.images_var.set(folder)
 
-    def _on_show_imported_toggle(self):
-        self.settings['show_imported'] = self.show_imported_var.get()
+    def _on_filter_toggle(self):
+        self.settings['show_imported']     = self.show_imported_var.get()
+        self.settings['show_not_imported'] = self.show_not_imported_var.get()
+        self.settings['show_site_only']    = self.show_site_only_var.get()
         save_settings(self.settings)
         self._apply_filter()
 
     def _save_settings(self):
         self.settings = {
-            'notes_folder': self.notes_var.get(),
-            'images_folder': self.images_var.get(),
-            'show_imported': self.show_imported_var.get(),
+            'notes_folder':      self.notes_var.get(),
+            'images_folder':     self.images_var.get(),
+            'show_imported':     self.show_imported_var.get(),
+            'show_not_imported': self.show_not_imported_var.get(),
+            'show_site_only':    self.show_site_only_var.get(),
         }
         save_settings(self.settings)
         self.status_var.set('Настройки сохранены.')
@@ -508,20 +532,29 @@ class ImportTool(tk.Tk):
         self.status_var.set('')
 
     def _apply_filter(self):
-        query = self.filter_var.get().lower()
-        show_imported = self.show_imported_var.get()
-        filtered = [
-            (path, imported) for path, imported in self._all_articles
-            if (show_imported or not imported) and query in path.lower()
+        query    = self.filter_var.get().lower()
+        show_new  = self.show_not_imported_var.get()
+        show_imp  = self.show_imported_var.get()
+        show_site = self.show_site_only_var.get()
+        self._filtered = [
+            (path, status) for path, status in self._all_articles
+            if ((show_new  and status == 'new')
+             or (show_imp  and status == 'imported')
+             or (show_site and status == 'site_only'))
+            and query in path.lower()
         ]
         self.listbox.delete(0, 'end')
-        for path, imported in filtered:
-            label = f'✓ {path}' if imported else path
-            self.listbox.insert('end', label)
-            if imported:
+        for path, status in self._filtered:
+            if status == 'imported':
+                self.listbox.insert('end', f'✓ {path}')
                 self.listbox.itemconfig('end', foreground='#999')
-        n, total = len(filtered), len(self._all_articles)
-        self.count_label.config(text=f'{n} из {total}' if query else (f'{total} шт.' if total else 'нет новых'))
+            elif status == 'site_only':
+                self.listbox.insert('end', f'◆ {path}')
+                self.listbox.itemconfig('end', foreground='#2980b9')
+            else:
+                self.listbox.insert('end', path)
+        n, total = len(self._filtered), len(self._all_articles)
+        self.count_label.config(text=f'{n} из {total}')
 
     def _select_all(self):
         self.listbox.select_set(0, 'end')
@@ -530,11 +563,18 @@ class ImportTool(tk.Tk):
         self.listbox.select_clear(0, 'end')
 
     def _import(self):
-        selected = [self.listbox.get(i).lstrip('✓ ') for i in self.listbox.curselection()]
-        if not selected:
-            messagebox.showwarning('Ничего не выбрано', 'Выберите хотя бы одну статью.')
+        chosen = [self._filtered[i] for i in self.listbox.curselection()]
+        importable = [path for path, status in chosen if status != 'site_only']
+        site_only  = [path for path, status in chosen if status == 'site_only']
+        if site_only:
+            messagebox.showinfo(
+                'Пропущено',
+                f'Пропущено {len(site_only)} статей — они есть только на сайте, источника в Obsidian нет.')
+        if not importable:
+            if not site_only:
+                messagebox.showwarning('Ничего не выбрано', 'Выберите хотя бы одну статью.')
             return
-        self._queue = list(selected)
+        self._queue = importable
         self._process_next()
 
     def _process_next(self):
