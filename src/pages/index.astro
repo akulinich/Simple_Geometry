@@ -1,0 +1,66 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const articles = (await getCollection('articles', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf())
+  .slice(0, 5);
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+---
+
+<BaseLayout title="Главная">
+  <p class="intro">
+    Привет. Меня зовут Саша. Я применяю вычислительную геометрию в программировании и в свободное время читаю разные книги и статьи по математике и алгоритмам. Этот сайт — мой личный сборник заметок и идей, которые мне показались интересными.
+  </p>
+
+  {articles.length > 0 && (
+    <section>
+      <h2>Последние статьи</h2>
+      <ul class="toc-list">
+        {articles.map(article => (
+          <li class="toc-item">
+            <a href={`${import.meta.env.BASE_URL}/articles/${article.slug}`}>
+              {article.data.title ?? article.slug}
+            </a>
+            <span class="toc-date">{formatDate(article.data.date)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+</BaseLayout>
+
+<style>
+.toc-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.toc-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.3rem 0;
+}
+
+.toc-item a {
+  text-decoration: none;
+  color: var(--text);
+}
+
+.toc-item a:hover {
+  color: var(--link-hover);
+}
+
+.toc-date {
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+</style>

@@ -1,0 +1,25 @@
+---
+const base = import.meta.env.BASE_URL;
+---
+<nav>
+  <a class="site-title" href={base}>
+    <img src={`${base}/tor.png`} alt="" class="site-logo" />
+    Simple Geometry
+  </a>
+  <a href={`${base}/articles`}>Статьи</a>
+  <a href={`${base}/about`}>Об авторе</a>
+</nav>
+
+<style>
+.site-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.site-logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+</style>

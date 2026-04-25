@@ -1,0 +1,37 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const articles = (await getCollection('articles', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+---
+
+<BaseLayout title="Статьи">
+  <h1>Статьи</h1>
+  <ul class="article-list">
+    {articles.map(article => (
+      <li>
+        <div class="article-list-item">
+          <h2>
+            <a href={`${import.meta.env.BASE_URL}/articles/${article.slug}`}>
+              {article.data.title ?? article.slug}
+            </a>
+          </h2>
+          <div class="date">{formatDate(article.data.date)}</div>
+          {article.data.description && <p>{article.data.description}</p>}
+          {article.data.tags.length > 0 && (
+            <div class="tags" style="margin-top: 0.5rem">
+              {article.data.tags.map(tag => (
+                <span class="tag">{tag}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </li>
+    ))}
+  </ul>
+</BaseLayout>
