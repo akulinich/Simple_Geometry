@@ -493,6 +493,7 @@ class ImportTool(tk.Tk):
         bottom = ttk.Frame(self)
         bottom.pack(fill='x', padx=14, pady=(0, 14))
         ttk.Button(bottom, text='Импортировать выбранные', command=self._import).pack(side='left')
+        ttk.Button(bottom, text='Удалить с сайта', command=self._delete_from_site).pack(side='left', padx=8)
         self.status_var = tk.StringVar()
         ttk.Label(bottom, textvariable=self.status_var, foreground='gray').pack(side='left', padx=12)
 
@@ -576,6 +577,61 @@ class ImportTool(tk.Tk):
             return
         self._queue = importable
         self._process_next()
+
+    def _delete_from_site(self):
+        chosen = [self._filtered[i] for i in self.listbox.curselection()]
+        deletable = [(path, status) for path, status in chosen if status in ('imported', 'site_only')]
+        if not deletable:
+            messagebox.showwarning('Ничего не выбрано', 'Выберите статьи, которые есть на сайте.')
+            return
+
+        names = [Path(p).name for p, _ in deletable]
+        if not messagebox.askyesno(
+                'Подтверждение удаления',
+                f'Удалить с сайта {len(deletable)} статей и их неиспользуемые картинки?\n\n'
+                + '\n'.join(names)):
+            return
+
+        deletable_names = {Path(p).name for p, _ in deletable}
+
+        # Картинки, которые нужны оставшимся статьям — трогать нельзя
+        images_in_use = set()
+        if ARTICLES_DIR.exists():
+            for f in ARTICLES_DIR.glob('*.md'):
+                if f.name not in deletable_names:
+                    images_in_use |= find_images_in_md(f.read_text(encoding='utf-8', errors='ignore'))
+
+        deleted_articles, deleted_images, errors = [], [], []
+
+        for path, _ in deletable:
+            article_name = Path(path).name
+            article_file = ARTICLES_DIR / article_name
+            try:
+                article_images = find_images_in_md(article_file.read_text(encoding='utf-8', errors='ignore'))
+            except Exception:
+                article_images = set()
+            try:
+                article_file.unlink()
+                deleted_articles.append(article_name)
+            except Exception as e:
+                errors.append(f'{article_name}: {e}')
+                continue
+            for img in article_images - images_in_use:
+                img_path = IMAGES_DIR / img
+                if img_path.exists():
+                    try:
+                        img_path.unlink()
+                        deleted_images.append(img)
+                    except Exception as e:
+                        errors.append(f'{img}: {e}')
+
+        self._refresh_list()
+        msg = f'Удалено статей: {len(deleted_articles)}'
+        if deleted_images:
+            msg += f'\nУдалено картинок: {len(deleted_images)}'
+        if errors:
+            msg += '\nОшибки:\n' + '\n'.join(errors)
+        messagebox.showinfo('Готово', msg)
 
     def _process_next(self):
         if not self._queue:
