@@ -1,4 +1,6 @@
 ---
+title: Существование триангуляции простого многоугольника
+id: existence-of-simple-polygon-triangulation
 tags:
   - ComputationalGeometry
 date: 2026-04-25

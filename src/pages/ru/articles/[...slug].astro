@@ -1,0 +1,49 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { useTranslations } from '../../../i18n/ui';
+
+export async function getStaticPaths() {
+  const all = await getCollection('articles', ({ data }) => !data.draft);
+  const ruArticles = all.filter(a => a.id.startsWith('ru/'));
+  const enSlugs = new Set(
+    all.filter(a => a.id.startsWith('en/')).map(a => a.slug.replace('en/', ''))
+  );
+  const base = import.meta.env.BASE_URL;
+  return ruArticles.map(article => {
+    const slug = article.slug.replace('ru/', '');
+    return {
+      params: { slug },
+      props: {
+        article,
+        otherLangUrl: enSlugs.has(slug) ? `${base}/en/articles/${slug}` : undefined,
+      },
+    };
+  });
+}
+
+const lang = 'ru';
+const t = useTranslations(lang);
+const { article, otherLangUrl } = Astro.props;
+const { Content } = await article.render();
+const title = article.data.title ?? article.slug.replace('ru/', '');
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+---
+
+<BaseLayout title={title} description={article.data.description} lang={lang} otherLangUrl={otherLangUrl}>
+  <article>
+    <h1>{title}</h1>
+    <div class="article-meta">
+      <span>{formatDate(article.data.date)}</span>
+      {article.data.tags.length > 0 && (
+        <div class="tags">
+          {article.data.tags.map(tag => <span class="tag">{tag}</span>)}
+        </div>
+      )}
+    </div>
+    <Content />
+  </article>
+</BaseLayout>

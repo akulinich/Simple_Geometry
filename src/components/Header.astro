@@ -1,25 +1,103 @@
 ---
+import type { Lang } from '../i18n/ui';
+import { useTranslations } from '../i18n/ui';
+
+interface Props {
+  lang: Lang;
+  otherLangUrl?: string;
+}
+
+const { lang, otherLangUrl } = Astro.props;
+const otherLang: Lang = lang === 'en' ? 'ru' : 'en';
+const t = useTranslations(lang);
 const base = import.meta.env.BASE_URL;
 ---
+
 <nav>
-  <a class="site-title" href={base}>
+  <a class="site-title" href={`${base}/${lang}/`}>
     <img src={`${base}/tor.png`} alt="" class="site-logo" />
     Simple Geometry
   </a>
-  <a href={`${base}/articles`}>Статьи</a>
-  <a href={`${base}/about`}>Об авторе</a>
+  <a href={`${base}/${lang}/articles/`}>{t('nav.articles')}</a>
+  <a href={`${base}/${lang}/about/`}>{t('nav.about')}</a>
+  <div class="lang-switcher">
+    {lang === 'en'
+      ? <span class="lang-active">en</span>
+      : otherLangUrl
+        ? <a href={otherLangUrl} class="lang-link" data-lang="en">en</a>
+        : <span class="lang-na">en</span>
+    }
+    <span class="lang-sep">/</span>
+    {lang === 'ru'
+      ? <span class="lang-active">ru</span>
+      : otherLangUrl
+        ? <a href={otherLangUrl} class="lang-link" data-lang="ru">ru</a>
+        : <span class="lang-na">ru</span>
+    }
+  </div>
 </nav>
 
+<script>
+  document.querySelectorAll<HTMLAnchorElement>('.lang-link').forEach(link => {
+    link.addEventListener('click', () => {
+      localStorage.setItem('lang', link.dataset.lang!);
+    });
+  });
+</script>
+
 <style>
+nav {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
 .site-title {
   display: flex;
   align-items: center;
   gap: 0.45rem;
+  margin-right: auto;
 }
+
 .site-logo {
   width: 26px;
   height: 26px;
   object-fit: contain;
   flex-shrink: 0;
+}
+
+.lang-switcher {
+  display: flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  font-variant: small-caps;
+}
+
+.lang-active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.lang-sep {
+  color: var(--muted);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.lang-link {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.lang-link:hover {
+  color: var(--link-hover);
+}
+
+.lang-na {
+  color: var(--muted);
+  opacity: 0.4;
+  cursor: default;
 }
 </style>

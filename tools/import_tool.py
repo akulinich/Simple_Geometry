@@ -10,10 +10,14 @@ import subprocess
 from pathlib import Path
 
 SETTINGS_FILE = Path(__file__).parent / 'settings.json'
-PROJECT_ROOT = Path(__file__).parent.parent
-ARTICLES_DIR = PROJECT_ROOT / 'src' / 'content' / 'articles'
-IMAGES_DIR = PROJECT_ROOT / 'public' / 'images'
+PROJECT_ROOT  = Path(__file__).parent.parent
+ARTICLES_DIR  = PROJECT_ROOT / 'src' / 'content' / 'articles'
+RU_DIR        = ARTICLES_DIR / 'ru'
+EN_DIR        = ARTICLES_DIR / 'en'
+IMAGES_DIR    = PROJECT_ROOT / 'public' / 'images'
 
+
+# ─── Settings ────────────────────────────────────────────────────────────────
 
 def load_settings():
     try:
@@ -28,6 +32,8 @@ def save_settings(settings):
         json.dump(settings, f, indent=2, ensure_ascii=False)
 
 
+# ─── Markdown helpers ─────────────────────────────────────────────────────────
+
 def find_images_in_md(content):
     images = set()
     for m in re.finditer(r'!\[\[([^\]|]+)', content):
@@ -39,67 +45,125 @@ def find_images_in_md(content):
     return images
 
 
-def get_all_articles(notes_folder):
-    """Returns list of (display_path, status) where status is 'new'|'imported'|'site_only'."""
-    site_names = set(os.listdir(ARTICLES_DIR)) if ARTICLES_DIR.exists() else set()
+# ─── Frontmatter helpers ──────────────────────────────────────────────────────
+
+def read_frontmatter(path):
+    """Return dict of simple key: value frontmatter fields."""
+    try:
+        content = path.read_text(encoding='utf-8')
+        m = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+        if not m:
+            return {}
+        result = {}
+        for line in m.group(1).splitlines():
+            if ':' in line and not line.startswith(' '):
+                k, _, v = line.partition(':')
+                result[k.strip()] = v.strip().strip('"\'')
+        return result
+    except Exception:
+        return {}
+
+
+def set_frontmatter_field(path, field, value):
+    """Add or update a scalar field in YAML frontmatter."""
+    content = path.read_text(encoding='utf-8')
+    m = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+
+    def quoted(v):
+        if any(c in str(v) for c in ':#{}[]|>&*!,?@`"\''):
+            return f'"{v}"'
+        return str(v)
+
+    if not m:
+        path.write_text(f'---\n{field}: {quoted(value)}\n---\n\n{content}',
+                        encoding='utf-8', newline='\n')
+        return
+
+    yaml_block = m.group(1)
+    rest = content[m.end():]
+    pat = re.compile(rf'^{re.escape(field)}:.*$', re.MULTILINE)
+    if pat.search(yaml_block):
+        yaml_block = pat.sub(f'{field}: {quoted(value)}', yaml_block)
+    else:
+        yaml_block = f'{field}: {quoted(value)}\n{yaml_block}'
+    path.write_text(f'---\n{yaml_block}\n---{rest}', encoding='utf-8', newline='\n')
+
+
+# ─── Article list ─────────────────────────────────────────────────────────────
+
+def get_all_articles(notes_folder, id_map, path_to_id):
+    """
+    id_map     : {id → obsidian_rel_path}
+    path_to_id : {obsidian_rel_path → id}
+    Returns list of (display_path, status, id_or_None).
+    status: 'new' | 'imported' | 'site_only'
+    """
+    ru_ids = {f.stem for f in RU_DIR.glob('*.md')} if RU_DIR.exists() else set()
     result = []
-    obsidian_names = set()
 
     if notes_folder and Path(notes_folder).exists():
         root = Path(notes_folder)
         for f in root.rglob('*.md'):
-            status = 'imported' if f.name in site_names else 'new'
-            result.append((str(f.relative_to(root)), status))
-            obsidian_names.add(f.name)
+            rel = str(f.relative_to(root))
+            aid = path_to_id.get(rel)
+            status = 'imported' if aid and aid in ru_ids else 'new'
+            result.append((rel, status, aid))
 
-    if ARTICLES_DIR.exists():
-        for f in ARTICLES_DIR.glob('*.md'):
-            if f.name not in obsidian_names:
-                result.append((f.name, 'site_only'))
+    if RU_DIR.exists():
+        for f in RU_DIR.glob('*.md'):
+            if f.stem not in id_map:
+                result.append((f.name, 'site_only', f.stem))
 
     return sorted(result, key=lambda x: x[0])
 
 
-# ─── Pipeline dialog ────────────────────────────────────────────────────────
+# ─── Pipeline dialog ──────────────────────────────────────────────────────────
 
 class PipelineDialog(tk.Toplevel):
-    # (step_id, group, label)
     STEP_DEFS = [
         (0, 'Предобработка', 'Убрать фон картинок'),
         (1, 'Предобработка', 'Заменить е → ё'),
-        (2, 'Анализ',        'Анализ текста'),
-        (3, 'Анализ',        'Анализ картинок'),
-        (4, 'Копирование',   'Копирование файлов'),
+        (2, 'Предобработка', 'Заполнить id'),
+        (3, 'Предобработка', 'Заполнить title'),
+        (4, 'Анализ',        'Анализ текста'),
+        (5, 'Анализ',        'Анализ картинок'),
+        (6, 'Перевод',       'Перевести на английский'),
+        (7, 'Копирование',   'Копирование файлов'),
     ]
-    AI_STEPS   = {2, 3}  # показывать кнопку «Повторить»
-    AUTO_STEPS = {0, 4}  # не показывать «Пропустить»
+    AI_STEPS       = {1, 2, 4, 5, 6}
+    AUTO_STEPS     = {0, 7}
+    EDITABLE_STEPS = {2, 3, 6}
 
     def __init__(self, parent, filename, notes_folder, images_folder, on_done):
         super().__init__(parent)
-        self.title(Path(filename).name)
-        self.geometry('760x560')
+        self.title(Path(filename).stem)
+        self.geometry('760x580')
         self.resizable(True, True)
         self.grab_set()
 
-        self.filename = filename
-        self.notes_folder = Path(notes_folder)
+        self.filename      = filename
+        self.notes_folder  = Path(notes_folder)
         self.images_folder = Path(images_folder)
-        self.on_done = on_done
+        self.on_done       = on_done
 
-        self._step_queue = []
-        self._queue_pos  = 0
+        self._step_queue  = []
+        self._queue_pos   = 0
         self._yo_result   = None
         self._yo_original = None
+        self._text_readonly = True
+
+        fm = read_frontmatter(self.notes_folder / self.filename)
+        self._article_id = fm.get('id', '').strip() or None
 
         self._build_prep()
         self._build_pipeline()
         self._show_prep()
 
-    # ── Preparation screen ───────────────────────────────────────────────────
+    # ── Prep screen ───────────────────────────────────────────────────────────
 
     def _build_prep(self):
         self._prep_frame = ttk.Frame(self)
-        self._step_vars  = {}  # step_id → BooleanVar
+        self._step_vars  = {}
 
         groups = {}
         for step_id, group, label in self.STEP_DEFS:
@@ -110,7 +174,7 @@ class PipelineDialog(tk.Toplevel):
                       font=('Segoe UI', 10, 'bold')).pack(anchor='w', padx=18, pady=(14, 2))
             for step_id, label in steps:
                 var = tk.BooleanVar(value=True)
-                state = 'disabled' if step_id == 4 else 'normal'
+                state = 'disabled' if step_id == 7 else 'normal'
                 ttk.Checkbutton(self._prep_frame, text=label,
                                 variable=var, state=state).pack(anchor='w', padx=36, pady=2)
                 self._step_vars[step_id] = var
@@ -131,7 +195,7 @@ class PipelineDialog(tk.Toplevel):
         self._pipeline_frame.pack(fill='both', expand=True)
         self._run_step()
 
-    # ── Pipeline screen ──────────────────────────────────────────────────────
+    # ── Pipeline screen ───────────────────────────────────────────────────────
 
     def _build_pipeline(self):
         self._pipeline_frame = ttk.Frame(self)
@@ -160,8 +224,7 @@ class PipelineDialog(tk.Toplevel):
         self.status_var = tk.StringVar()
         ttk.Label(bottom, textvariable=self.status_var, foreground='gray').pack(side='left', padx=10)
 
-    @staticmethod
-    def _on_text_key(e):
+    def _on_text_key(self, e):
         if e.char == '\x03':
             try:
                 text = e.widget.get(tk.SEL_FIRST, tk.SEL_LAST)
@@ -173,9 +236,11 @@ class PipelineDialog(tk.Toplevel):
         if e.char == '\x01':
             e.widget.tag_add(tk.SEL, '1.0', 'end')
             return 'break'
-        if not e.char:
-            return None
-        return 'break'
+        if self._text_readonly:
+            if not e.char:
+                return None
+            return 'break'
+        return None
 
     def _write(self, text):
         self.text.insert('end', text)
@@ -197,7 +262,8 @@ class PipelineDialog(tk.Toplevel):
             self.skip_btn.config(state='normal')
 
     def _next_step(self):
-        self.ready_btn.config(command=self._next_step)
+        self._text_readonly = True
+        self.ready_btn.config(text='Готово →', command=self._next_step)
         self._yo_result = None
         self._queue_pos += 1
         self.ready_btn.config(state='disabled')
@@ -212,10 +278,9 @@ class PipelineDialog(tk.Toplevel):
         self._clear()
         self.status_var.set('')
         step = self._current_step()
-        if step == 2:
-            self._step_text()
-        elif step == 3:
-            self._step_images()
+        {1: self._step_fix_yo, 2: self._step_fill_id,
+         4: self._step_text,   5: self._step_images,
+         6: self._step_translate}[step]()
 
     def _run_step(self):
         if self._queue_pos >= len(self._step_queue):
@@ -227,13 +292,17 @@ class PipelineDialog(tk.Toplevel):
         self.step_label.config(text=f'Шаг {pos} из {total} — {label}')
         self._clear()
         self.status_var.set('')
+        self._text_readonly = step not in self.EDITABLE_STEPS
         {0: self._step_remove_bg,
          1: self._step_fix_yo,
-         2: self._step_text,
-         3: self._step_images,
-         4: self._step_copy}[step]()
+         2: self._step_fill_id,
+         3: self._step_fill_title,
+         4: self._step_text,
+         5: self._step_images,
+         6: self._step_translate,
+         7: self._step_copy}[step]()
 
-    # ── Shared CLI runner ────────────────────────────────────────────────────
+    # ── Shared CLI runner ─────────────────────────────────────────────────────
 
     def _run_claude_cmd(self, cmd, on_done_msg='', on_captured=None):
         def worker():
@@ -257,7 +326,7 @@ class PipelineDialog(tk.Toplevel):
                 self.after(0, lambda: self.skip_btn.config(state='normal'))
         threading.Thread(target=worker, daemon=True).start()
 
-    # ── Step 0: remove background ────────────────────────────────────────────
+    # ── Step 0: remove background ─────────────────────────────────────────────
 
     def _step_remove_bg(self):
         self.status_var.set('Обрабатываю...')
@@ -298,7 +367,7 @@ class PipelineDialog(tk.Toplevel):
 
         self.after(0, self._set_ready)
 
-    # ── Step 1: fix е→ё ─────────────────────────────────────────────────────
+    # ── Step 1: fix е→ё ──────────────────────────────────────────────────────
 
     def _step_fix_yo(self):
         self.status_var.set('Анализирую...')
@@ -342,7 +411,83 @@ class PipelineDialog(tk.Toplevel):
         self.ready_btn.config(text='Готово →', command=self._next_step)
         self._next_step()
 
-    # ── Step 2: text analysis ────────────────────────────────────────────────
+    # ── Step 2: fill id ───────────────────────────────────────────────────────
+
+    def _step_fill_id(self):
+        if self._article_id:
+            self._write(f'{self._article_id}\n')
+            self._text_readonly = False
+            self.ready_btn.config(text='Применить →', state='normal', command=self._apply_id_and_next)
+            self.skip_btn.config(state='normal')
+            self.status_var.set('id уже задан — отредактируйте или нажмите «Применить»')
+            return
+
+        self.status_var.set('Генерирую slug...')
+        stem = Path(self.filename).stem
+        prompt = (
+            f"Generate a concise URL-friendly slug in English for a Russian math article "
+            f"with filename '{stem}'. "
+            f"Return ONLY the slug (lowercase Latin letters, digits, hyphens, max 50 chars). "
+            f"No explanation, no quotes, no newlines."
+        )
+        self._run_claude_cmd(
+            ['claude', '-p', prompt],
+            on_done_msg='Проверьте slug, отредактируйте при необходимости и нажмите «Применить».',
+            on_captured=self._on_id_done,
+        )
+
+    def _on_id_done(self, text):
+        slug = re.sub(r'[^a-z0-9-]', '', text.strip().lower())
+        self._clear()
+        self._write(slug)
+        self._text_readonly = False
+        self.ready_btn.config(text='Применить →', command=self._apply_id_and_next)
+
+    def _apply_id_and_next(self):
+        raw  = self.text.get('1.0', 'end').strip().split('\n')[0]
+        slug = re.sub(r'[^a-z0-9-]', '', raw.lower())
+        if not slug:
+            messagebox.showerror('Ошибка', 'Пустой id. Введите корректный slug.')
+            return
+        if (RU_DIR / f'{slug}.md').exists() and slug != self._article_id:
+            messagebox.showwarning('Дубликат', f'Статья с id "{slug}" уже есть на сайте.')
+            return
+        try:
+            set_frontmatter_field(self.notes_folder / self.filename, 'id', slug)
+            self._article_id = slug
+        except Exception as e:
+            messagebox.showerror('Ошибка', f'Не удалось сохранить id: {e}')
+            return
+        self.ready_btn.config(text='Готово →', command=self._next_step)
+        self._next_step()
+
+    # ── Step 3: fill title ────────────────────────────────────────────────────
+
+    def _step_fill_title(self):
+        fm = read_frontmatter(self.notes_folder / self.filename)
+        existing = fm.get('title', '').strip()
+        suggested = existing or Path(self.filename).stem.replace('-', ' ').replace('_', ' ')
+        self._write(suggested)
+        self._text_readonly = False
+        self.ready_btn.config(text='Применить →', state='normal', command=self._apply_title_and_next)
+        self.skip_btn.config(state='normal')
+        msg = 'title уже задан' if existing else 'Отредактируйте заголовок'
+        self.status_var.set(f'{msg} → нажмите «Применить»')
+
+    def _apply_title_and_next(self):
+        title = self.text.get('1.0', 'end').strip()
+        if not title:
+            messagebox.showerror('Ошибка', 'Заголовок не может быть пустым.')
+            return
+        try:
+            set_frontmatter_field(self.notes_folder / self.filename, 'title', title)
+        except Exception as e:
+            messagebox.showerror('Ошибка', f'Не удалось сохранить title: {e}')
+            return
+        self.ready_btn.config(text='Готово →', command=self._next_step)
+        self._next_step()
+
+    # ── Step 4: text analysis ─────────────────────────────────────────────────
 
     def _step_text(self):
         self.status_var.set('Анализирую...')
@@ -359,7 +504,7 @@ class PipelineDialog(tk.Toplevel):
             on_done_msg='Исправьте замечания и нажмите «Готово»',
         )
 
-    # ── Step 3: image analysis ───────────────────────────────────────────────
+    # ── Step 5: image analysis ────────────────────────────────────────────────
 
     def _step_images(self):
         content  = (self.notes_folder / self.filename).read_text(encoding='utf-8')
@@ -384,17 +529,68 @@ class PipelineDialog(tk.Toplevel):
             on_done_msg='Проверьте замечания и нажмите «Готово»',
         )
 
-    # ── Step 4: copy ─────────────────────────────────────────────────────────
+    # ── Step 6: translate ─────────────────────────────────────────────────────
+
+    def _step_translate(self):
+        self.status_var.set('Перевожу...')
+        content = (self.notes_folder / self.filename).read_text(encoding='utf-8')
+        prompt  = (
+            "Translate this math article from Russian to English. "
+            "Preserve all LaTeX formulas unchanged. "
+            "In YAML frontmatter: translate title, description, and tags to English; "
+            "keep id, date (must stay in YYYY-MM-DD format), draft, and references unchanged. "
+            "Return ONLY the complete translated markdown, no explanation, no code fences.\n\n"
+            + content
+        )
+        self._run_claude_cmd(
+            ['claude', '-p', prompt],
+            on_done_msg='Отредактируйте при необходимости и нажмите «Применить».',
+            on_captured=self._on_translate_done,
+        )
+
+    def _on_translate_done(self, text):
+        self._clear()
+        self._write(text.strip())
+        self._text_readonly = False
+        self.ready_btn.config(text='Применить →', command=self._apply_translate_and_next)
+
+    def _apply_translate_and_next(self):
+        text = self.text.get('1.0', 'end').strip()
+        if text:
+            aid = self._article_id
+            if not aid:
+                aid = read_frontmatter(self.notes_folder / self.filename).get('id', '').strip()
+            if not aid:
+                messagebox.showerror('Ошибка', 'id не задан. Пройдите шаг «Заполнить id».')
+                return
+            try:
+                EN_DIR.mkdir(parents=True, exist_ok=True)
+                (EN_DIR / f'{aid}.md').write_text(text, encoding='utf-8', newline='\n')
+                messagebox.showinfo('Готово', f'Английская версия сохранена: en/{aid}.md')
+            except Exception as e:
+                messagebox.showerror('Ошибка', f'Не удалось сохранить: {e}')
+                return
+        self.ready_btn.config(text='Готово →', command=self._next_step)
+        self._next_step()
+
+    # ── Step 7: copy ──────────────────────────────────────────────────────────
 
     def _step_copy(self):
+        aid = self._article_id
+        if not aid:
+            aid = read_frontmatter(self.notes_folder / self.filename).get('id', '').strip()
+        if not aid:
+            self._write('⚠ id не задан. Пройдите шаг «Заполнить id».\n')
+            self.ready_btn.config(text='Закрыть', state='normal', command=self._finish)
+            return
+
         try:
-            content   = (self.notes_folder / self.filename).read_text(encoding='utf-8')
-            dest_name = Path(self.filename).name
-            ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
+            content = (self.notes_folder / self.filename).read_text(encoding='utf-8')
+            RU_DIR.mkdir(parents=True, exist_ok=True)
             IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
-            shutil.copy2(self.notes_folder / self.filename, ARTICLES_DIR / dest_name)
-            self._write(f'✓  {dest_name}\n')
+            shutil.copy2(self.notes_folder / self.filename, RU_DIR / f'{aid}.md')
+            self._write(f'✓  ru/{aid}.md\n')
 
             copied, missing = [], []
             for img in find_images_in_md(content):
@@ -418,7 +614,7 @@ class PipelineDialog(tk.Toplevel):
         self.destroy()
 
 
-# ─── Main window ────────────────────────────────────────────────────────────
+# ─── Main window ──────────────────────────────────────────────────────────────
 
 class ImportTool(tk.Tk):
     def __init__(self):
@@ -426,10 +622,12 @@ class ImportTool(tk.Tk):
         self.title('Obsidian → Simple Geometry')
         self.geometry('700x520')
         self.resizable(True, True)
-        self.settings = load_settings()
+        self.settings    = load_settings()
         self._all_articles = []
-        self._filtered = []
-        self._queue = []
+        self._filtered   = []
+        self._id_map     = {}   # {id → rel_path}
+        self._path_to_id = {}   # {rel_path → id}
+        self._queue      = []
         self._build_ui()
         self._refresh_list()
 
@@ -461,6 +659,7 @@ class ImportTool(tk.Tk):
         ttk.Button(btn_row, text='Обновить', command=self._refresh_list).pack(side='left')
         ttk.Button(btn_row, text='Выбрать все', command=self._select_all).pack(side='left', padx=6)
         ttk.Button(btn_row, text='Снять все', command=self._deselect_all).pack(side='left')
+
         self.show_not_imported_var = tk.BooleanVar(value=self.settings.get('show_not_imported', True))
         ttk.Checkbutton(btn_row, text='Не импортированные',
                         variable=self.show_not_imported_var,
@@ -473,6 +672,7 @@ class ImportTool(tk.Tk):
         ttk.Checkbutton(btn_row, text='Только на сайте',
                         variable=self.show_site_only_var,
                         command=self._on_filter_toggle).pack(side='left', padx=4)
+
         self.count_label = ttk.Label(btn_row, text='', foreground='gray')
         self.count_label.pack(side='right')
 
@@ -527,7 +727,18 @@ class ImportTool(tk.Tk):
         self._refresh_list()
 
     def _refresh_list(self):
-        self._all_articles = get_all_articles(self.notes_var.get())
+        self._id_map     = {}
+        self._path_to_id = {}
+        folder = self.notes_var.get()
+        if folder and Path(folder).exists():
+            root = Path(folder)
+            for f in root.rglob('*.md'):
+                aid = read_frontmatter(f).get('id', '').strip()
+                if aid:
+                    rel = str(f.relative_to(root))
+                    self._id_map[aid]     = rel
+                    self._path_to_id[rel] = aid
+        self._all_articles = get_all_articles(folder, self._id_map, self._path_to_id)
         self.filter_var.set('')
         self._apply_filter()
         self.status_var.set('')
@@ -538,14 +749,14 @@ class ImportTool(tk.Tk):
         show_imp  = self.show_imported_var.get()
         show_site = self.show_site_only_var.get()
         self._filtered = [
-            (path, status) for path, status in self._all_articles
+            (path, status, aid) for path, status, aid in self._all_articles
             if ((show_new  and status == 'new')
              or (show_imp  and status == 'imported')
              or (show_site and status == 'site_only'))
             and query in path.lower()
         ]
         self.listbox.delete(0, 'end')
-        for path, status in self._filtered:
+        for path, status, _ in self._filtered:
             if status == 'imported':
                 self.listbox.insert('end', f'✓ {path}')
                 self.listbox.itemconfig('end', foreground='#999')
@@ -564,9 +775,9 @@ class ImportTool(tk.Tk):
         self.listbox.select_clear(0, 'end')
 
     def _import(self):
-        chosen = [self._filtered[i] for i in self.listbox.curselection()]
-        importable = [path for path, status in chosen if status != 'site_only']
-        site_only  = [path for path, status in chosen if status == 'site_only']
+        chosen     = [self._filtered[i] for i in self.listbox.curselection()]
+        importable = [(p, s, a) for p, s, a in chosen if s != 'site_only']
+        site_only  = [p for p, s, a in chosen if s == 'site_only']
         if site_only:
             messagebox.showinfo(
                 'Пропущено',
@@ -575,47 +786,50 @@ class ImportTool(tk.Tk):
             if not site_only:
                 messagebox.showwarning('Ничего не выбрано', 'Выберите хотя бы одну статью.')
             return
-        self._queue = importable
+        self._queue = [p for p, s, a in importable]
         self._process_next()
 
     def _delete_from_site(self):
-        chosen = [self._filtered[i] for i in self.listbox.curselection()]
-        deletable = [(path, status) for path, status in chosen if status in ('imported', 'site_only')]
+        chosen    = [self._filtered[i] for i in self.listbox.curselection()]
+        deletable = [(p, s, a) for p, s, a in chosen if s in ('imported', 'site_only')]
         if not deletable:
             messagebox.showwarning('Ничего не выбрано', 'Выберите статьи, которые есть на сайте.')
             return
 
-        names = [Path(p).name for p, _ in deletable]
+        names = [a or p for p, s, a in deletable]
         if not messagebox.askyesno(
                 'Подтверждение удаления',
-                f'Удалить с сайта {len(deletable)} статей и их неиспользуемые картинки?\n\n'
+                f'Удалить с сайта {len(deletable)} статей (ru/ + en/) и их неиспользуемые картинки?\n\n'
                 + '\n'.join(names)):
             return
 
-        deletable_names = {Path(p).name for p, _ in deletable}
+        deletable_ids = {a for _, _, a in deletable if a}
 
-        # Картинки, которые нужны оставшимся статьям — трогать нельзя
         images_in_use = set()
-        if ARTICLES_DIR.exists():
-            for f in ARTICLES_DIR.glob('*.md'):
-                if f.name not in deletable_names:
-                    images_in_use |= find_images_in_md(f.read_text(encoding='utf-8', errors='ignore'))
+        for d in [RU_DIR, EN_DIR]:
+            if d.exists():
+                for f in d.glob('*.md'):
+                    if f.stem not in deletable_ids:
+                        images_in_use |= find_images_in_md(
+                            f.read_text(encoding='utf-8', errors='ignore'))
 
         deleted_articles, deleted_images, errors = [], [], []
 
-        for path, _ in deletable:
-            article_name = Path(path).name
-            article_file = ARTICLES_DIR / article_name
-            try:
-                article_images = find_images_in_md(article_file.read_text(encoding='utf-8', errors='ignore'))
-            except Exception:
-                article_images = set()
-            try:
-                article_file.unlink()
-                deleted_articles.append(article_name)
-            except Exception as e:
-                errors.append(f'{article_name}: {e}')
+        for _, _, article_id in deletable:
+            if not article_id:
+                errors.append('нет id у одной из статей')
                 continue
+            article_images = set()
+            for d in [RU_DIR, EN_DIR]:
+                f = d / f'{article_id}.md'
+                if f.exists():
+                    try:
+                        article_images |= find_images_in_md(
+                            f.read_text(encoding='utf-8', errors='ignore'))
+                        f.unlink()
+                        deleted_articles.append(f.name)
+                    except Exception as e:
+                        errors.append(f'{f.name}: {e}')
             for img in article_images - images_in_use:
                 img_path = IMAGES_DIR / img
                 if img_path.exists():
@@ -626,7 +840,7 @@ class ImportTool(tk.Tk):
                         errors.append(f'{img}: {e}')
 
         self._refresh_list()
-        msg = f'Удалено статей: {len(deleted_articles)}'
+        msg = f'Удалено файлов: {len(deleted_articles)}'
         if deleted_images:
             msg += f'\nУдалено картинок: {len(deleted_images)}'
         if errors:
@@ -636,7 +850,7 @@ class ImportTool(tk.Tk):
     def _process_next(self):
         if not self._queue:
             self._refresh_list()
-            self.status_var.set(f'Готово.')
+            self.status_var.set('Готово.')
             return
         filename = self._queue.pop(0)
         PipelineDialog(

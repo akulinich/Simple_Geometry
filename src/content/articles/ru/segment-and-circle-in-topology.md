@@ -1,4 +1,6 @@
 ---
+title: Отрезок и окружность в топологии
+id: segment-and-circle-in-topology
 tags:
   - Топология
 date: 2026-04-25

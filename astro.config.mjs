@@ -12,8 +12,7 @@ export default defineConfig({
       remarkMath,
       [remarkWikiLink, {
         pageResolver: (name) => [name.toLowerCase().replace(/ /g, '-')],
-        // hardcoded base — if repo is renamed, update here too
-        hrefTemplate: (permalink) => `/Simple_Geometry/articles/${permalink}`,
+        hrefTemplate: (permalink) => `/Simple_Geometry/en/articles/${permalink}`,
       }],
       [remarkObsidianImage, { base: '/Simple_Geometry' }],
     ],
