@@ -4,8 +4,6 @@ Personal notes on geometry, topology, and computational algorithms. Built as a s
 
 **Live site:** https://akulinich.github.io/Simple_Geometry
 
----
-
 ## Stack
 
 - **[Astro](https://astro.build)** — static site generator with Content Collections
