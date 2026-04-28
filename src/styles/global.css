@@ -220,9 +220,8 @@ img {
 
 /* Footer */
 footer {
-  margin-top: 4rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 0;
   font-size: 0.85rem;
   color: var(--muted);
   text-align: center;
@@ -232,6 +231,16 @@ footer {
 .intro {
   margin-bottom: 2.5rem;
   font-size: 1.05rem;
+}
+
+/* AI disclaimer on home page */
+.ai-note {
+  margin-top: 3rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--muted);
 }
 
 @media (max-width: 600px) {

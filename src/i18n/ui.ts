@@ -7,6 +7,7 @@ export const ui = {
     'articles.heading': 'Articles',
     'meta.description': 'Notes on geometry',
     'article.date': 'en-US',
+    'home.ai_note': 'All article ideas and Russian-language text are written by me. The role of artificial intelligence is limited to proofreading, spell-checking, image generation, translation assistance, and the website itself.',
   },
   ru: {
     'nav.articles': 'Статьи',
@@ -16,6 +17,7 @@ export const ui = {
     'articles.heading': 'Статьи',
     'meta.description': 'Заметки о геометрии',
     'article.date': 'ru-RU',
+    'home.ai_note': 'Все идеи статей и русскоязычный текст написаны мной. Участие искусственного интеллекта ограничивается проверкой синтаксиса, орфографии, генерацией картинок, помощью в переводе на английский и работой самого сайта.',
   },
 } as const;
 
