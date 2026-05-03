@@ -157,6 +157,23 @@ img {
   margin: 1.75rem auto;
 }
 
+/* Figure captions */
+figure {
+  margin: 1.75rem auto;
+}
+
+figure img {
+  margin: 0 auto;
+}
+
+figcaption {
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 0.5rem;
+}
+
 /* KaTeX display math */
 .katex-display {
   margin: 1.75rem 0;

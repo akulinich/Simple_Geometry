@@ -12,13 +12,24 @@ export default function remarkObsidianImage({ base = '' } = {}) {
         if (match.index > lastIndex) {
           newNodes.push({ type: 'text', value: node.value.slice(lastIndex, match.index) });
         }
-        const filename = match[1];
-        newNodes.push({
-          type: 'image',
-          url: `${base}/images/${filename}`,
-          alt: filename,
-          title: null,
-        });
+        const [rawFilename, rawCaption] = match[1].split('|');
+        const filename = rawFilename.trim();
+        const caption  = rawCaption?.trim();
+        const src      = `${base}/images/${filename}`;
+
+        if (caption) {
+          newNodes.push({
+            type: 'html',
+            value: `<figure><img src="${src}" alt="${caption}" /><figcaption>${caption}</figcaption></figure>`,
+          });
+        } else {
+          newNodes.push({
+            type: 'image',
+            url: src,
+            alt: filename,
+            title: null,
+          });
+        }
         lastIndex = match.index + match[0].length;
       }
 
