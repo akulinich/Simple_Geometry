@@ -123,16 +123,17 @@ class PipelineDialog(tk.Toplevel):
     STEP_DEFS = [
         (0, 'Предобработка', 'Убрать фон картинок'),
         (1, 'Предобработка', 'Заменить е → ё'),
-        (2, 'Предобработка', 'Заполнить id'),
-        (3, 'Предобработка', 'Заполнить title'),
-        (4, 'Анализ',        'Анализ текста'),
-        (5, 'Анализ',        'Анализ картинок'),
-        (6, 'Перевод',       'Перевести на английский'),
-        (7, 'Копирование',   'Копирование файлов'),
+        (2, 'Предобработка', 'Исправить орфографию и пунктуацию'),
+        (3, 'Предобработка', 'Заполнить id'),
+        (4, 'Предобработка', 'Заполнить title'),
+        (5, 'Анализ',        'Анализ текста'),
+        (6, 'Анализ',        'Анализ картинок'),
+        (7, 'Перевод',       'Перевести на английский'),
+        (8, 'Копирование',   'Копирование файлов'),
     ]
-    AI_STEPS       = {1, 2, 4, 5, 6}
-    AUTO_STEPS     = {0, 7}
-    EDITABLE_STEPS = {2, 3, 6}
+    AI_STEPS       = {1, 2, 3, 5, 6, 7}
+    AUTO_STEPS     = {0, 8}
+    EDITABLE_STEPS = {3, 4, 7}
 
     def __init__(self, parent, filename, notes_folder, images_folder, on_done):
         super().__init__(parent)
@@ -148,8 +149,10 @@ class PipelineDialog(tk.Toplevel):
 
         self._step_queue  = []
         self._queue_pos   = 0
-        self._yo_result   = None
-        self._yo_original = None
+        self._yo_result      = None
+        self._yo_original    = None
+        self._spell_result   = None
+        self._spell_original = None
         self._text_readonly = True
 
         fm = read_frontmatter(self.notes_folder / self.filename)
@@ -278,9 +281,9 @@ class PipelineDialog(tk.Toplevel):
         self._clear()
         self.status_var.set('')
         step = self._current_step()
-        {1: self._step_fix_yo, 2: self._step_fill_id,
-         4: self._step_text,   5: self._step_images,
-         6: self._step_translate}[step]()
+        {1: self._step_fix_yo,   2: self._step_fix_spell,
+         3: self._step_fill_id,  5: self._step_text,
+         6: self._step_images,   7: self._step_translate}[step]()
 
     def _run_step(self):
         if self._queue_pos >= len(self._step_queue):
@@ -295,12 +298,13 @@ class PipelineDialog(tk.Toplevel):
         self._text_readonly = step not in self.EDITABLE_STEPS
         {0: self._step_remove_bg,
          1: self._step_fix_yo,
-         2: self._step_fill_id,
-         3: self._step_fill_title,
-         4: self._step_text,
-         5: self._step_images,
-         6: self._step_translate,
-         7: self._step_copy}[step]()
+         2: self._step_fix_spell,
+         3: self._step_fill_id,
+         4: self._step_fill_title,
+         5: self._step_text,
+         6: self._step_images,
+         7: self._step_translate,
+         8: self._step_copy}[step]()
 
     # ── Shared CLI runner ─────────────────────────────────────────────────────
 
@@ -411,7 +415,55 @@ class PipelineDialog(tk.Toplevel):
         self.ready_btn.config(text='Готово →', command=self._next_step)
         self._next_step()
 
-    # ── Step 2: fill id ───────────────────────────────────────────────────────
+    # ── Step 2: fix spelling & punctuation ───────────────────────────────────
+
+    def _step_fix_spell(self):
+        self.status_var.set('Анализирую...')
+        self._spell_original = (self.notes_folder / self.filename).read_text(encoding='utf-8')
+        prompt = (
+            "Исправь в тексте только явные орфографические ошибки и ошибки пунктуации "
+            "(запятые, тире, кавычки и т.д.). "
+            "Не трогай формулы LaTeX и математические обозначения. "
+            "Не меняй стиль, структуру или формулировки. "
+            "Верни ТОЛЬКО исправленный текст без объяснений и без форматирования markdown.\n\n"
+            + self._spell_original
+        )
+        self._run_claude_cmd(
+            ['claude', '-p', prompt],
+            on_done_msg='«Применить» — сохранить в файл.  «Пропустить» — не сохранять.',
+            on_captured=self._on_spell_done,
+        )
+
+    def _on_spell_done(self, text):
+        self._spell_result = text.strip()
+        self.ready_btn.config(text='Применить →', command=self._apply_spell_and_next)
+        self._show_spell_diff()
+
+    def _show_spell_diff(self):
+        if not self._spell_original or not self._spell_result:
+            return
+        self._clear()
+        self.text.tag_configure('spell_change', foreground='#c0392b', font=('Segoe UI', 10, 'bold'))
+        matcher = difflib.SequenceMatcher(None, self._spell_original, self._spell_result, autojunk=False)
+        for op, i1, i2, j1, j2 in matcher.get_opcodes():
+            chunk = self._spell_result[j1:j2]
+            if op == 'equal':
+                self.text.insert('end', chunk)
+            elif op in ('replace', 'insert'):
+                self.text.insert('end', chunk, 'spell_change')
+
+    def _apply_spell_and_next(self):
+        if self._spell_result:
+            try:
+                (self.notes_folder / self.filename).write_text(
+                    self._spell_result, encoding='utf-8')
+                messagebox.showinfo('Готово', 'Исправления сохранены в файл.')
+            except Exception as e:
+                messagebox.showerror('Ошибка', f'Не удалось сохранить: {e}')
+        self.ready_btn.config(text='Готово →', command=self._next_step)
+        self._next_step()
+
+    # ── Step 3: fill id ───────────────────────────────────────────────────────
 
     def _step_fill_id(self):
         if self._article_id:
@@ -487,7 +539,7 @@ class PipelineDialog(tk.Toplevel):
         self.ready_btn.config(text='Готово →', command=self._next_step)
         self._next_step()
 
-    # ── Step 4: text analysis ─────────────────────────────────────────────────
+    # ── Step 5: text analysis ─────────────────────────────────────────────────
 
     def _step_text(self):
         self.status_var.set('Анализирую...')
@@ -504,7 +556,7 @@ class PipelineDialog(tk.Toplevel):
             on_done_msg='Исправьте замечания и нажмите «Готово»',
         )
 
-    # ── Step 5: image analysis ────────────────────────────────────────────────
+    # ── Step 6: image analysis ────────────────────────────────────────────────
 
     def _step_images(self):
         content  = (self.notes_folder / self.filename).read_text(encoding='utf-8')
@@ -529,7 +581,7 @@ class PipelineDialog(tk.Toplevel):
             on_done_msg='Проверьте замечания и нажмите «Готово»',
         )
 
-    # ── Step 6: translate ─────────────────────────────────────────────────────
+    # ── Step 7: translate ─────────────────────────────────────────────────────
 
     def _step_translate(self):
         self.status_var.set('Перевожу...')
@@ -573,7 +625,7 @@ class PipelineDialog(tk.Toplevel):
         self.ready_btn.config(text='Готово →', command=self._next_step)
         self._next_step()
 
-    # ── Step 7: copy ──────────────────────────────────────────────────────────
+    # ── Step 8: copy ──────────────────────────────────────────────────────────
 
     def _step_copy(self):
         aid = self._article_id
