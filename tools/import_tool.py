@@ -727,18 +727,21 @@ class PipelineDialog(tk.Toplevel):
             return
 
         stem_to_id = {Path(p).stem: a for p, a in self._path_to_id.items()}
+        known_ids  = set(stem_to_id.values())
         pattern = re.compile(r'(?<!!)\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]')
 
-        def replace_links(content, url_prefix):
+        def replace_links(content):
             resolved, unresolved = [], []
 
             def replacer(m):
                 name    = m.group(1).strip()
                 display = (m.group(2) or name).strip()
+                if name in known_ids:
+                    return m.group(0)
                 target  = stem_to_id.get(name)
                 if target:
                     resolved.append(name)
-                    return f'[{display}]({url_prefix}{target})'
+                    return f'[[{target}|{display}]]'
                 unresolved.append(name)
                 return m.group(0)
 
@@ -746,16 +749,13 @@ class PipelineDialog(tk.Toplevel):
 
         any_changed = False
         all_unresolved = set()
-        for path, prefix in [
-            (RU_DIR / f'{aid}.md', '../'),
-            (EN_DIR / f'{aid}.md', '../'),
-        ]:
+        for path in [RU_DIR / f'{aid}.md', EN_DIR / f'{aid}.md']:
             lang = path.parent.name
             if not path.exists():
                 self._write(f'⚠  {lang}/{aid}.md не найден — пропускаю.\n')
                 continue
             content = path.read_text(encoding='utf-8')
-            new_content, resolved, unresolved = replace_links(content, prefix)
+            new_content, resolved, unresolved = replace_links(content)
             if new_content != content:
                 path.write_text(new_content, encoding='utf-8', newline='\n')
                 any_changed = True
@@ -891,7 +891,6 @@ class ImportTool(tk.Tk):
         self.settings = {
             'notes_folder':      self.notes_var.get(),
             'images_folder':     self.images_var.get(),
-            'base_url':          self.settings.get('base_url', ''),
             'show_imported':     self.show_imported_var.get(),
             'show_not_imported': self.show_not_imported_var.get(),
             'show_site_only':    self.show_site_only_var.get(),
@@ -1032,7 +1031,6 @@ class ImportTool(tk.Tk):
             self.notes_var.get(), self.images_var.get(),
             on_done=self._process_next,
             path_to_id=self._path_to_id,
-
         )
 
 

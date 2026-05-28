@@ -1,20 +1,16 @@
 import { defineConfig } from 'astro/config';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import remarkWikiLink from 'remark-wiki-link';
+import remarkWikiLink from './src/plugins/remark-wiki-link.js';
 import remarkObsidianImage from './src/plugins/remark-obsidian-image.js';
 
 export default defineConfig({
   site: 'https://akulinich.github.io',
   base: '/Simple_Geometry',
-  trailingSlash: 'always',
   markdown: {
     remarkPlugins: [
       remarkMath,
-      [remarkWikiLink, {
-        pageResolver: (name) => [name.toLowerCase().replace(/ /g, '-')],
-        hrefTemplate: (permalink) => `/Simple_Geometry/en/articles/${permalink}`,
-      }],
+      [remarkWikiLink, { base: '/Simple_Geometry' }],
       [remarkObsidianImage, { base: '/Simple_Geometry' }],
     ],
     rehypePlugins: [
