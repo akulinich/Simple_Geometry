@@ -10,11 +10,21 @@ import subprocess
 from pathlib import Path
 
 SETTINGS_FILE = Path(__file__).parent / 'settings.json'
+PROMPTS_DIR   = Path(__file__).parent / 'promts'
 PROJECT_ROOT  = Path(__file__).parent.parent
 ARTICLES_DIR  = PROJECT_ROOT / 'src' / 'content' / 'articles'
 RU_DIR        = ARTICLES_DIR / 'ru'
 EN_DIR        = ARTICLES_DIR / 'en'
 IMAGES_DIR    = PROJECT_ROOT / 'public' / 'images'
+
+
+# ─── Prompt loader ───────────────────────────────────────────────────────────
+
+def load_prompt(name, **kwargs):
+    text = (PROMPTS_DIR / f'{name}.md').read_text(encoding='utf-8').strip()
+    for key, val in kwargs.items():
+        text = text.replace(f'{{{key}}}', val)
+    return text
 
 
 # ─── Settings ────────────────────────────────────────────────────────────────
@@ -131,12 +141,13 @@ class PipelineDialog(tk.Toplevel):
         (7, 'Перевод',       'Перевести на английский'),
         (8, 'Перевод',       'Проверить терминологию'),
         (9, 'Копирование',   'Копирование файлов'),
+        (10, 'Копирование',  'Проставить ссылки'),
     ]
     AI_STEPS       = {1, 2, 3, 5, 6, 7, 8}
-    AUTO_STEPS     = {0, 9}
+    AUTO_STEPS     = {0, 9, 10}
     EDITABLE_STEPS = {3, 4, 7}
 
-    def __init__(self, parent, filename, notes_folder, images_folder, on_done):
+    def __init__(self, parent, filename, notes_folder, images_folder, on_done, path_to_id=None):
         super().__init__(parent)
         self.title(Path(filename).stem)
         self.geometry('760x580')
@@ -147,6 +158,7 @@ class PipelineDialog(tk.Toplevel):
         self.notes_folder  = Path(notes_folder)
         self.images_folder = Path(images_folder)
         self.on_done       = on_done
+        self._path_to_id   = path_to_id or {}
 
         self._step_queue  = []
         self._queue_pos   = 0
@@ -274,7 +286,10 @@ class PipelineDialog(tk.Toplevel):
         self._queue_pos += 1
         self.ready_btn.config(state='disabled')
         self.skip_btn.config(state='disabled')
-        self.retry_btn.config(state='disabled')
+        self.retry_btn.config(state='disabled', text='Повторить', command=self._retry)
+        if self._queue_pos >= len(self._step_queue):
+            self.ready_btn.config(state='normal', text='Закрыть', command=self._finish)
+            return
         self._run_step()
 
     def _retry(self):
@@ -290,9 +305,6 @@ class PipelineDialog(tk.Toplevel):
          8: self._step_check_terms}[step]()
 
     def _run_step(self):
-        if self._queue_pos >= len(self._step_queue):
-            self._finish()
-            return
         step = self._current_step()
         pos, total = self._queue_pos + 1, len(self._step_queue)
         _, _, label = self.STEP_DEFS[step]
@@ -309,7 +321,8 @@ class PipelineDialog(tk.Toplevel):
          6: self._step_images,
          7: self._step_translate,
          8: self._step_check_terms,
-         9: self._step_copy}[step]()
+         9: self._step_copy,
+         10: self._step_resolve_links}[step]()
 
     # ── Shared CLI runner ─────────────────────────────────────────────────────
 
@@ -381,11 +394,7 @@ class PipelineDialog(tk.Toplevel):
     def _step_fix_yo(self):
         self.status_var.set('Анализирую...')
         self._yo_original = (self.notes_folder / self.filename).read_text(encoding='utf-8')
-        prompt = (
-            "В тексте ниже замени 'е' на 'ё' везде, где это требуется по правилам русского языка. "
-            "Верни ТОЛЬКО исправленный текст, без объяснений и без форматирования markdown.\n\n"
-            + self._yo_original
-        )
+        prompt = load_prompt('fix_yo') + '\n\n' + self._yo_original
         self._run_claude_cmd(
             ['claude', '-p', prompt],
             on_done_msg='«Применить» — сохранить в файл.  «Пропустить» — не сохранять.',
@@ -425,19 +434,7 @@ class PipelineDialog(tk.Toplevel):
     def _step_fix_spell(self):
         self.status_var.set('Анализирую...')
         self._spell_original = (self.notes_folder / self.filename).read_text(encoding='utf-8')
-        prompt = (
-            "Исправь в тексте следующее:\n"
-            "1. Явные орфографические ошибки и ошибки пунктуации.\n"
-            "2. Замени дефисы на тире (—) там, где это требуется по правилам русского языка "
-            "(между частями предложения, в значении «это», после обращений и т.д.). "
-            "Дефисы внутри слов и составных слов не трогай.\n"
-            "3. Замени кавычки на русские ёлочки (<<>>). "
-            "Для вложенных кавычек внутри ёлочек используй нижние лапки.\n"
-            "Не трогай формулы LaTeX и математические обозначения. "
-            "Не меняй стиль, структуру или формулировки. "
-            "Верни ТОЛЬКО исправленный текст без объяснений и без форматирования markdown.\n\n"
-            + self._spell_original
-        )
+        prompt = load_prompt('fix_spell') + '\n\n' + self._spell_original
         self._run_claude_cmd(
             ['claude', '-p', prompt],
             on_done_msg='«Применить» — сохранить в файл.  «Пропустить» — не сохранять.',
@@ -447,6 +444,7 @@ class PipelineDialog(tk.Toplevel):
     def _on_spell_done(self, text):
         self._spell_result = text.strip()
         self.ready_btn.config(text='Применить →', command=self._apply_spell_and_next)
+        self.retry_btn.config(text='Применить и повторить', command=self._apply_spell_and_retry)
         self._show_spell_diff()
 
     def _show_spell_diff(self):
@@ -473,6 +471,23 @@ class PipelineDialog(tk.Toplevel):
         self.ready_btn.config(text='Готово →', command=self._next_step)
         self._next_step()
 
+    def _apply_spell_and_retry(self):
+        if self._spell_result:
+            try:
+                (self.notes_folder / self.filename).write_text(
+                    self._spell_result, encoding='utf-8')
+            except Exception as e:
+                messagebox.showerror('Ошибка', f'Не удалось сохранить: {e}')
+                return
+        self._spell_result   = None
+        self._spell_original = None
+        self.ready_btn.config(state='disabled', text='Готово →')
+        self.skip_btn.config(state='disabled')
+        self.retry_btn.config(state='disabled')
+        self._clear()
+        self.status_var.set('')
+        self._step_fix_spell()
+
     # ── Step 3: fill id ───────────────────────────────────────────────────────
 
     def _step_fill_id(self):
@@ -486,12 +501,7 @@ class PipelineDialog(tk.Toplevel):
 
         self.status_var.set('Генерирую slug...')
         stem = Path(self.filename).stem
-        prompt = (
-            f"Generate a concise URL-friendly slug in English for a Russian math article "
-            f"with filename '{stem}'. "
-            f"Return ONLY the slug (lowercase Latin letters, digits, hyphens, max 50 chars). "
-            f"No explanation, no quotes, no newlines."
-        )
+        prompt = load_prompt('fill_id', stem=stem)
         self._run_claude_cmd(
             ['claude', '-p', prompt],
             on_done_msg='Проверьте slug, отредактируйте при необходимости и нажмите «Применить».',
@@ -554,17 +564,7 @@ class PipelineDialog(tk.Toplevel):
     def _step_text(self):
         self.status_var.set('Анализирую...')
         content = (self.notes_folder / self.filename).read_text(encoding='utf-8')
-        prompt  = (
-            "Проверь следующую математическую статью на ошибки грамматики, пунктуации и синтаксиса LaTeX. "
-            "Выдай пронумерованный список замечаний с точной цитатой из текста. "
-            "Если формулу LaTeX можно улучшить — дай рекомендации. "
-            "Важно: статья намеренно написана с элементами разговорного стиля — это часть авторского замысла, "
-            "чтобы сделать текст менее сухим. Не считай разговорные обороты ошибками. "
-            "Наоборот, если видишь места где уместно было бы добавить живости или неформального тона — "
-            "предложи это отдельным пунктом. "
-            "Если ошибок нет — скажи об этом.\n\n"
-            f"Статья:\n{content}"
-        )
+        prompt  = load_prompt('text_analysis') + '\n' + content
         self._run_claude_cmd(
             ['claude', '-p', prompt],
             on_done_msg='Исправьте замечания и нажмите «Готово»',
@@ -584,12 +584,7 @@ class PipelineDialog(tk.Toplevel):
 
         self.status_var.set('Анализирую картинки...')
         paths  = ', '.join(str(p) for _, p in existing)
-        prompt = (
-            f"Посмотри на картинки по путям: {paths}\n\n"
-            "Проверь каждую: что на ней изображено и соответствует ли она тексту статьи? "
-            "Укажи конкретно если что-то не так.\n\n"
-            f"Текст статьи:\n{content}"
-        )
+        prompt = load_prompt('images', paths=paths) + '\n' + content
         self._run_claude_cmd(
             ['claude', '-p', prompt, '--allowedTools', 'Read'],
             on_done_msg='Проверьте замечания и нажмите «Готово»',
@@ -600,14 +595,7 @@ class PipelineDialog(tk.Toplevel):
     def _step_translate(self):
         self.status_var.set('Перевожу...')
         content = (self.notes_folder / self.filename).read_text(encoding='utf-8')
-        prompt  = (
-            "Translate this math article from Russian to English. "
-            "Preserve all LaTeX formulas unchanged. "
-            "In YAML frontmatter: translate title, description, and tags to English; "
-            "keep id, date (must stay in YYYY-MM-DD format), draft, and references unchanged. "
-            "Return ONLY the complete translated markdown, no explanation, no code fences.\n\n"
-            + content
-        )
+        prompt  = load_prompt('translate') + '\n\n' + content
         self._run_claude_cmd(
             ['claude', '-p', prompt],
             on_done_msg='Отредактируйте при необходимости и нажмите «Применить».',
@@ -652,15 +640,7 @@ class PipelineDialog(tk.Toplevel):
             return
         self.status_var.set('Проверяю терминологию...')
         self._terms_original = en_path.read_text(encoding='utf-8')
-        prompt = (
-            "Review the following English math article for natural and standard mathematical terminology. "
-            "Fix any terms that are non-standard, unnatural, or unusual for English-language mathematics "
-            "(e.g. calques from Russian or awkward phrasing of standard concepts). "
-            "Preserve all LaTeX formulas unchanged. "
-            "Do not change style, structure, or meaning — only fix terminology. "
-            "Return ONLY the corrected markdown, no explanation, no code fences.\n\n"
-            + self._terms_original
-        )
+        prompt = load_prompt('check_terms') + '\n\n' + self._terms_original
         self._run_claude_cmd(
             ['claude', '-p', prompt],
             on_done_msg='«Применить» — сохранить.  «Пропустить» — не сохранять.',
@@ -730,10 +710,77 @@ class PipelineDialog(tk.Toplevel):
             if copied:  self._write(f'✓  Картинки: {", ".join(copied)}\n')
             if missing: self._write(f'⚠  Не найдены: {", ".join(missing)}\n')
 
-            self.ready_btn.config(text='Закрыть', state='normal', command=self._finish)
+            self.ready_btn.config(text='Готово →', state='normal', command=self._next_step)
         except Exception as e:
             self._write(f'Ошибка: {e}\n')
             self.ready_btn.config(text='Закрыть', state='normal', command=self._finish)
+
+    # ── Step 10: resolve inter-article links ─────────────────────────────────
+
+    def _step_resolve_links(self):
+        aid = self._article_id
+        if not aid:
+            aid = read_frontmatter(self.notes_folder / self.filename).get('id', '').strip()
+        if not aid:
+            self._write('⚠ id не задан — пропускаю.\n')
+            self._set_ready()
+            return
+
+        stem_to_id = {Path(p).stem: a for p, a in self._path_to_id.items()}
+        pattern = re.compile(r'(?<!!)\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]')
+
+        def replace_links(content, url_prefix):
+            resolved, unresolved = [], []
+
+            def replacer(m):
+                name    = m.group(1).strip()
+                display = (m.group(2) or name).strip()
+                target  = stem_to_id.get(name)
+                if target:
+                    resolved.append(name)
+                    return f'[{display}]({url_prefix}{target})'
+                unresolved.append(name)
+                return m.group(0)
+
+            return pattern.sub(replacer, content), resolved, unresolved
+
+        any_changed = False
+        all_unresolved = set()
+        for path, prefix in [
+            (RU_DIR / f'{aid}.md', ''),
+            (EN_DIR / f'{aid}.md', ''),
+        ]:
+            lang = path.parent.name
+            if not path.exists():
+                self._write(f'⚠  {lang}/{aid}.md не найден — пропускаю.\n')
+                continue
+            content = path.read_text(encoding='utf-8')
+            new_content, resolved, unresolved = replace_links(content, prefix)
+            if new_content != content:
+                path.write_text(new_content, encoding='utf-8', newline='\n')
+                any_changed = True
+            if resolved:
+                self._write(f'✓  {lang}: {", ".join(dict.fromkeys(resolved))}\n')
+            if unresolved:
+                self._write(f'⚠  {lang} не найдено: {", ".join(dict.fromkeys(unresolved))}\n')
+                all_unresolved.update(unresolved)
+            if not resolved and not unresolved:
+                self._write(f'—  {lang}: ссылок нет.\n')
+
+        if not any_changed:
+            self._write('Изменений нет.\n')
+
+        if all_unresolved:
+            messagebox.showerror(
+                'Нераспознанные ссылки',
+                'Импорт остановлен.\n\nНе найдены статьи для ссылок:\n'
+                + '\n'.join(f'  • {n}' for n in sorted(all_unresolved))
+                + '\n\nИмпортируйте указанные статьи и повторите.',
+            )
+            self.ready_btn.config(text='Закрыть', state='normal', command=self.destroy)
+            return
+
+        self._set_ready()
 
     def _finish(self):
         self.on_done()
@@ -844,6 +891,7 @@ class ImportTool(tk.Tk):
         self.settings = {
             'notes_folder':      self.notes_var.get(),
             'images_folder':     self.images_var.get(),
+            'base_url':          self.settings.get('base_url', ''),
             'show_imported':     self.show_imported_var.get(),
             'show_not_imported': self.show_not_imported_var.get(),
             'show_site_only':    self.show_site_only_var.get(),
@@ -983,6 +1031,8 @@ class ImportTool(tk.Tk):
             self, filename,
             self.notes_var.get(), self.images_var.get(),
             on_done=self._process_next,
+            path_to_id=self._path_to_id,
+
         )
 
 

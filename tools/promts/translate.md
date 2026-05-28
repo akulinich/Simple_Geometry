@@ -1,0 +1,1 @@
+Translate this math article from Russian to English. Preserve all LaTeX formulas unchanged. In YAML frontmatter: translate title, description, and tags to English; keep id, date (must stay in YYYY-MM-DD format), draft, and references unchanged. Return ONLY the complete translated markdown, no explanation, no code fences.

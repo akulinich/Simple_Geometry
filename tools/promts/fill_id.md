@@ -1,0 +1,1 @@
+Generate a concise URL-friendly slug in English for a Russian math article with filename '{stem}'. Return ONLY the slug (lowercase Latin letters, digits, hyphens, max 50 chars). No explanation, no quotes, no newlines.
