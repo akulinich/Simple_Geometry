@@ -7,7 +7,7 @@ tags:
 date: 2026-05-27
 references: []
 ---
-In the article [transformation matrices](transformation-matrices) we discussed the basic plane transformations, such as rotations, reflections, scalings, and translations. All of them are affine transformations, i.e., they have the form:
+In the article [transformation matrices](../transformation-matrices) we discussed the basic plane transformations, such as rotations, reflections, scalings, and translations. All of them are affine transformations, i.e., they have the form:
 $$ f(x) = A x + b$$
 where $A \in \mathrm{GL}(n, \mathbb{R})$ is an invertible matrix, and $x$ and $b$ are ordinary vectors in $\mathbb{R}^n$.
 

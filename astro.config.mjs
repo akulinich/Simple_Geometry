@@ -7,6 +7,7 @@ import remarkObsidianImage from './src/plugins/remark-obsidian-image.js';
 export default defineConfig({
   site: 'https://akulinich.github.io',
   base: '/Simple_Geometry',
+  trailingSlash: 'always',
   markdown: {
     remarkPlugins: [
       remarkMath,

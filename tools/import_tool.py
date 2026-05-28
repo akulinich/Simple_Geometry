@@ -747,8 +747,8 @@ class PipelineDialog(tk.Toplevel):
         any_changed = False
         all_unresolved = set()
         for path, prefix in [
-            (RU_DIR / f'{aid}.md', ''),
-            (EN_DIR / f'{aid}.md', ''),
+            (RU_DIR / f'{aid}.md', '../'),
+            (EN_DIR / f'{aid}.md', '../'),
         ]:
             lang = path.parent.name
             if not path.exists():
