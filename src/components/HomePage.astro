@@ -1,0 +1,37 @@
+---
+import type { Lang } from '../i18n/ui';
+import { useTranslations } from '../i18n/ui';
+import { getArticlesForLang, formatDate } from '../utils/articles';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+const base = import.meta.env.BASE_URL;
+
+const articles = (await getArticlesForLang(lang)).slice(0, 5);
+---
+
+<p class="intro">{t('home.intro')}</p>
+
+{articles.length > 0 && (
+  <section>
+    <h2>{t('home.latest')}</h2>
+    <ul class="toc-list">
+      {articles.map(article => {
+        const slug = article.slug.replace(`${lang}/`, '');
+        return (
+          <li class="toc-item">
+            <a class="toc-title" href={`${base}/${lang}/articles/${slug}`}>
+              {article.data.title ?? slug}
+            </a>
+            <span class="toc-date">{formatDate(article.data.date, lang)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  </section>
+)}
+<p class="ai-note">{t('home.ai_note')}</p>

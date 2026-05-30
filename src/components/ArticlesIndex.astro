@@ -1,7 +1,7 @@
 ---
-import { getCollection } from 'astro:content';
 import type { Lang } from '../i18n/ui';
 import { useTranslations } from '../i18n/ui';
+import { getArticlesForLang, formatDate } from '../utils/articles';
 
 interface Props {
   lang: Lang;
@@ -10,18 +10,12 @@ interface Props {
 const { lang } = Astro.props;
 const t = useTranslations(lang);
 const base = import.meta.env.BASE_URL;
-const locale = t('article.date');
 
-const articles = (await getCollection('articles', ({ data, id }) => !data.draft && id.startsWith(`${lang}/`)))
-  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+const articles = await getArticlesForLang(lang);
 
 const allTags = Array.from(
   new Set(articles.flatMap(a => a.data.tags ?? []))
 ).sort((a, b) => a.localeCompare(b, lang));
-
-function formatDate(date: Date) {
-  return date.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
-}
 ---
 
 <h1>{t('articles.heading')}</h1>
@@ -71,7 +65,7 @@ function formatDate(date: Date) {
             <button type="button" class="tag tag-pick" data-tag={tag}>{tag}</button>
           ))}
         </span>
-        <span class="toc-date">{formatDate(article.data.date)}</span>
+        <span class="toc-date">{formatDate(article.data.date, lang, 'short')}</span>
       </li>
     );
   })}

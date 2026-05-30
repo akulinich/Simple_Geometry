@@ -1,0 +1,27 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import type { Lang } from '../i18n/ui';
+import { formatDate } from '../utils/articles';
+
+interface Props {
+  article: CollectionEntry<'articles'>;
+  lang: Lang;
+}
+
+const { article, lang } = Astro.props;
+const { Content } = await article.render();
+const title = article.data.title ?? article.slug.replace(`${lang}/`, '');
+---
+
+<article>
+  <h1>{title}</h1>
+  <div class="article-meta">
+    <span>{formatDate(article.data.date, lang)}</span>
+    {article.data.tags.length > 0 && (
+      <div class="tags">
+        {article.data.tags.map(tag => <span class="tag">{tag}</span>)}
+      </div>
+    )}
+  </div>
+  <Content />
+</article>
